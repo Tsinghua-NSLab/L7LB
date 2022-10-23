@@ -14,6 +14,7 @@ from scapy.all import sendp, send, get_if_list, get_if_hwaddr, get_if_addr
 from scapy.all import Packet, sniff, srp1, sr1
 from scapy.all import Ether, IP, UDP, TCP, ARP, ICMP
 
+from client import BFRTClient
 
 # 配置: 单次发送的最大信息数
 SEND_STEP = 10
@@ -71,6 +72,8 @@ class L7CPU:
         ["10.0.1.3:1122", "10.0.1.2:22"],
         ["10.0.1.3:3322", "10.0.1.3:22"]
     ]
+    session_in_tbl = 'SwitchIngress.seesion_in'
+    session_out_tbl = 'SwitchIngress.seesion_out'
 
     def get_DIP_Port(self, vip ,vport, payload=""):
         # 实际使用中要把payload作为参数传输, 根据payload查找到真正的dip和dport
@@ -317,6 +320,67 @@ class L7CPU:
 
                 # 即, cli->VIP的包, 需要把ack增加 (srv_ack-cli_ack), 可以把数据转化成64b后计算 ( 2^32 + srv_ack - cli_ack ) & (2^32 - 1)
                 #      DIP->cli的包, seq增加计算同理
+                flow_strings = reverse_flow.split(' ')
+                s_client_ip, s_client_port = flow_strings[0].split(':')
+                client_ip = struct.unpack("!L", socket.inet_aton(s_client_ip))[0]
+                client_port = int(s_client_port)
+                s_vip, s_vport = flow_strings[2].split(':')
+                vip = struct.unpack("!L", socket.inet_aton(s_vip))[0]
+                vport = int(s_vport)
+                s_dip, dport = self.session_dip_port[reverse_flow]
+                dip = struct.unpack("!L", socket.inet_aton(s_dip))[0]
+                cpu_syn_ack = self.session_cli_ack[reverse_flow]
+                dip_syn_ack = self.session_srv_ack[reverse_flow]
+                if cpu_syn_ack >= dip_syn_ack:
+                    diff = cpu_syn_ack - dip_syn_ack
+                    invrs_diff = (2 ** 32) + dip_syn_ack - cpu_syn_ack
+                else:
+                    invrs_diff = dip_syn_ack - cpu_syn_ack
+                    diff = (2 ** 32) + cpu_syn_ack - dip_syn_ack
+                self.write_table(client_ip, client_port, vip, vport, dip, dport, invrs_diff, diff)
+
+    def write_table(client_ip, client_port, vip, vport, dip, dport, invrs_diff, diff):
+        # all input arguments are integers
+        # in session_in_tbl: hdr.tcp.ack_no = hdr.tcp.ack_no + ackDiff
+        # in session_out_tbl: hdr.tcp.seq_no = hdr.tcp.seq_no + seqDiff
+
+        # session_in_tbl
+        input_match = []
+        input_action = []
+        input_match.append(['hdr.ipv4.src_addr', client_ip])
+        input_match.append(['hdr.ipv4.dst_addr', vip])
+        input_match.append(['hdr.tcp.src_port', client_port])
+        input_match.append(['hdr.tcp.dst_port', vport])
+        input_action.append(['SwitchIngress.session_hit_in'])
+        input_action.append(['seqDiff', 0])
+        input_action.append(['ackDiff', invrs_diff])
+        input_action.append(['dstIP', dip])
+        input_action.append(['dstPort', dport])
+        self.bfrt_client.write_table(session_in_tbl, input_match, input_action)
+
+        # session_out_tbl
+        input_match = []
+        input_action = []
+        input_match.append(['hdr.ipv4.src_addr', dip])
+        input_match.append(['hdr.ipv4.dst_addr', client_ip])
+        input_match.append(['hdr.tcp.src_port', dport])
+        input_match.append(['hdr.tcp.dst_port', client_port])
+        input_action.append(['SwitchIngress.session_hit_out'])
+        input_action.append(['seqDiff', diff])
+        input_action.append(['ackDiff', 0])
+        input_action.append(['srcIP', vip])
+        input_action.append(['srcPort', vport])
+        self.bfrt_client.write_table(session_out_tbl, input_match, input_action)
+
+    def read_table(self):
+        print ('current %s table entries' % session_in_tbl)
+        self.bfrt_client.read_table(session_in_tbl)
+        print ('current %s table entries' % session_out_tbl)
+        self.bfrt_client.read_table(session_out_tbl)
+
+    def init_client(self):
+        self.bfrt_client = BFRTClient()
+        self.read_table()
 
     def listen(self):
         '''监听网络端口, 作为proxy, 收到SYN报文后, 完成相关建链记录相关信息'''
@@ -333,6 +397,7 @@ def main(args):
     if args.iface_mac != cpu_mac:
         print("[ERROR] CPU MAC address of interface " + args.iface + " is not " + args.iface_mac + ", but " + cpu_mac)
     cpu_main = L7CPU(cpu_iface, cpu_mac)
+    cpu_main.init_client()
     cpu_main.listen()
 
 if __name__ == '__main__':
