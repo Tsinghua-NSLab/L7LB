@@ -302,8 +302,21 @@ class L7CPU:
                     new_pkt = self.get_new_pkt_from_cli(self.session_pkts[reverse_flow][0], reverse_flow)
                     self.middle_out_pkt(new_pkt) # 发送出去缓存的client网包
                     self.session_pkts[reverse_flow].pop(0)
-                # TODO: session已经建立完毕, 需要下放相关配置到switch
+                # TODO: session已经建立完毕, 需要下放相关配置到switch.
 
+                # 当前这条流的CLI_IP、CLI_PORT、VIP、VPORT、DIP、DPORT的内容为
+                # CLI_IP:CLI_PORT -> VIP:VPORT = reverse_flow (reverse_flow是一个string类型)
+                # (DIP, DPORT) = self.session_dip_port[reverse_flow]
+                
+                # 记录下来的两个ack值分别是
+                #   CLI<->CPU之间的第一个SYN+ACK包的seq为 cli_ack = self.session_cli_ack[reverse_flow]
+                #   CPU<->SRV之间的第一个SYN+ACK包的seq为 srv_ack = self.session_srv_ack[reverse_flow]
+                # 
+                # 对于cli->VIP的包, 转成DIP后, 其seq不变, 其ack变成 orign_ack - cli_ack + srv_ack
+                # 对于DIP->cli的包, 转成VIP后, 其ack不变, 其seq变成 origin_seq - srv_ack + cli_ack
+
+                # 即, cli->VIP的包, 需要把ack增加 (srv_ack-cli_ack), 可以把数据转化成64b后计算 ( 2^32 + srv_ack - cli_ack ) & (2^32 - 1)
+                #      DIP->cli的包, seq增加计算同理
 
     def listen(self):
         '''监听网络端口, 作为proxy, 收到SYN报文后, 完成相关建链记录相关信息'''
@@ -320,7 +333,7 @@ def main(args):
     if args.iface_mac != cpu_mac:
         print("[ERROR] CPU MAC address of interface " + args.iface + " is not " + args.iface_mac + ", but " + cpu_mac)
     cpu_main = L7CPU(cpu_iface, cpu_mac)
-    cpu_main.middle()
+    cpu_main.listen()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='cpu_run.py')
