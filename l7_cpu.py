@@ -36,7 +36,7 @@ ECE = 0x40
 CWR = 0x80
 
 
-DEBUG_CHENGJUN = True
+DEBUG_CHENGJUN = False
 
 def print_nop():
     print("================")
