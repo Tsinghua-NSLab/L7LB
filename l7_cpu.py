@@ -72,8 +72,8 @@ class L7CPU:
         ["10.0.1.3:1122", "10.0.1.2:22"],
         ["10.0.1.3:3322", "10.0.1.3:22"]
     ]
-    session_in_tbl = 'SwitchIngress.seesion_in'
-    session_out_tbl = 'SwitchIngress.seesion_out'
+    session_in_tbl = 'SwitchIngress.session_in'
+    session_out_tbl = 'SwitchIngress.session_out'
 
     def get_DIP_Port(self, vip ,vport, payload=""):
         # 实际使用中要把payload作为参数传输, 根据payload查找到真正的dip和dport
@@ -339,7 +339,7 @@ class L7CPU:
                     diff = (2 ** 32) + cpu_syn_ack - dip_syn_ack
                 self.write_table(client_ip, client_port, vip, vport, dip, dport, invrs_diff, diff)
 
-    def write_table(client_ip, client_port, vip, vport, dip, dport, invrs_diff, diff):
+    def write_table(self, client_ip, client_port, vip, vport, dip, dport, invrs_diff, diff):
         # all input arguments are integers
         # in session_in_tbl: hdr.tcp.ack_no = hdr.tcp.ack_no + ackDiff
         # in session_out_tbl: hdr.tcp.seq_no = hdr.tcp.seq_no + seqDiff
@@ -356,7 +356,7 @@ class L7CPU:
         input_action.append(['ackDiff', invrs_diff])
         input_action.append(['dstIP', dip])
         input_action.append(['dstPort', dport])
-        self.bfrt_client.write_table(session_in_tbl, input_match, input_action)
+        self.bfrt_client.write_table(self.session_in_tbl, input_match, input_action)
 
         # session_out_tbl
         input_match = []
@@ -370,13 +370,13 @@ class L7CPU:
         input_action.append(['ackDiff', 0])
         input_action.append(['srcIP', vip])
         input_action.append(['srcPort', vport])
-        self.bfrt_client.write_table(session_out_tbl, input_match, input_action)
+        self.bfrt_client.write_table(self.session_out_tbl, input_match, input_action)
 
     def read_table(self):
-        print ('current %s table entries' % session_in_tbl)
-        self.bfrt_client.read_table(session_in_tbl)
-        print ('current %s table entries' % session_out_tbl)
-        self.bfrt_client.read_table(session_out_tbl)
+        print ('current %s table entries' % self.session_in_tbl)
+        self.bfrt_client.read_table(self.session_in_tbl)
+        print ('current %s table entries' % self.session_out_tbl)
+        self.bfrt_client.read_table(self.session_out_tbl)
 
     def init_client(self):
         self.bfrt_client = BFRTClient()
