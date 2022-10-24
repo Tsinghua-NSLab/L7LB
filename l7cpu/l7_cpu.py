@@ -76,14 +76,14 @@ class L7CPU:
     session_out_tbl = 'SwitchIngress.session_out'
 
     def get_DIP_Port(self, cip, vip ,vport, payload=""):
-        # 实际使用中要把payload作为参数传输, 根据payload查找到真正的dip和dport
+        # 把payload作为参数传输, 根据payload查找到真正的dip和dport
         vip_val = vip + ":" + str(vport)
         dip_val = []
         for vip_items in self.VIP2DIP:
             if vip_val == vip_items[0]:
                 # 我们找到了vip的结果
                 dip_val.append(vip_items[1])
-        dip, dport = dip_val[int(cip.split(".")[3]) % 2].split(":")
+        dip, dport = dip_val[(int(cip.split(".")[3]) + hash(payload)) % len(dip_val)].split(":")
         return dip, int(dport)
 
     def get_VIP_Port(self, dip, dport):
