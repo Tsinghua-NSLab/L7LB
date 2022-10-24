@@ -69,20 +69,22 @@ class L7CPU:
     # 记录VIP到DIP的映射(在实际场景中, 我们并不是通过这种简单的查表完成的映射, 而要基于payload完成查表)
     #    实际使用中要把get_DIP_Port函数替换成真正的查表函数
     VIP2DIP = [
-        ["10.0.1.3:1122", "10.0.1.2:22"],
-        ["10.0.1.3:3322", "10.0.1.3:22"]
+        ["10.0.1.10:1122", "10.0.1.2:22"],
+        ["10.0.1.10:1122", "10.0.1.3:22"]
     ]
     session_in_tbl = 'SwitchIngress.session_in'
     session_out_tbl = 'SwitchIngress.session_out'
 
-    def get_DIP_Port(self, vip ,vport, payload=""):
+    def get_DIP_Port(self, cip, vip ,vport, payload=""):
         # 实际使用中要把payload作为参数传输, 根据payload查找到真正的dip和dport
         vip_val = vip + ":" + str(vport)
+        dip_val = []
         for vip_items in self.VIP2DIP:
             if vip_val == vip_items[0]:
                 # 我们找到了vip的结果
-                dip, dport = vip_items[1].split(":")
-                return dip, int(dport)
+                dip_val.append(vip_items[1])
+        dip, dport = dip_val[int(cip.split(".")[3]) % 2].split(":")
+        return dip, int(dport)
 
     def get_VIP_Port(self, dip, dport):
         dip_val = dip + ":" + str(dport)
@@ -251,7 +253,7 @@ class L7CPU:
                     # 更新报文MAC
                     new_pkt[Ether].src, new_pkt[Ether].dst = self.cpu_mac, new_pkt[Ether].src # 交换MAC地址
                     # 更新目的IP和目的端口, 并记录下来
-                    dip, dport = self.get_DIP_Port(new_pkt[IP].dst, new_pkt[TCP].dport) # 找到DIP和DPORT
+                    dip, dport = self.get_DIP_Port(new_pkt[IP].src, new_pkt[IP].dst, new_pkt[TCP].dport) # 找到DIP和DPORT
                     new_pkt[IP].dst, new_pkt[TCP].dport = dip, dport
                     self.session_dip_port[flow] = (dip, dport) # 记录原来的流映射后的DIP和DPORT的信息
                     cli_dip_flow = new_pkt[IP].src + ":" + str(new_pkt[TCP].sport) + " -> " + new_pkt[IP].dst + ":" + str(new_pkt[TCP].dport)
