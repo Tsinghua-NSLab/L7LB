@@ -299,18 +299,12 @@ class L7CPU:
                 # 更新session记录
                 self.session_srv_ack[reverse_flow] = pkt[TCP].seq # 收到的SYN_ACK网包的seq就是CPU->srv的ack
                 self.session_state_map[reverse_flow] |= SESSION_STATE_DONE
-                for _ in range(0, SEND_STEP): # 快点把缓存的网包都发送完毕
-                    if len(self.session_pkts[reverse_flow]) == 0: 
-                        break
-                    new_pkt = self.get_new_pkt_from_cli(self.session_pkts[reverse_flow][0], reverse_flow)
-                    self.middle_out_pkt(new_pkt) # 发送出去缓存的client网包
-                    self.session_pkts[reverse_flow].pop(0)
-                # TODO: session已经建立完毕, 需要下放相关配置到switch.
+
+                # session已经建立完毕, 需要下放相关配置到switch.
 
                 # 当前这条流的CLI_IP、CLI_PORT、VIP、VPORT、DIP、DPORT的内容为
                 # CLI_IP:CLI_PORT -> VIP:VPORT = reverse_flow (reverse_flow是一个string类型)
                 # (DIP, DPORT) = self.session_dip_port[reverse_flow]
-                
                 # 记录下来的两个ack值分别是
                 #   CLI<->CPU之间的第一个SYN+ACK包的seq为 cli_ack = self.session_cli_ack[reverse_flow]
                 #   CPU<->SRV之间的第一个SYN+ACK包的seq为 srv_ack = self.session_srv_ack[reverse_flow]
@@ -338,6 +332,13 @@ class L7CPU:
                     invrs_diff = dip_syn_ack - cpu_syn_ack
                     diff = (2 ** 32) + cpu_syn_ack - dip_syn_ack
                 self.write_table(client_ip, client_port, vip, vport, dip, dport, invrs_diff, diff)
+
+                for _ in range(0, SEND_STEP): # 快点把缓存的网包都发送完毕
+                    if len(self.session_pkts[reverse_flow]) == 0: 
+                        break
+                    new_pkt = self.get_new_pkt_from_cli(self.session_pkts[reverse_flow][0], reverse_flow)
+                    self.middle_out_pkt(new_pkt) # 发送出去缓存的client网包
+                    self.session_pkts[reverse_flow].pop(0)
 
     def write_table(self, client_ip, client_port, vip, vport, dip, dport, invrs_diff, diff):
         # all input arguments are integers
@@ -396,6 +397,7 @@ def main(args):
     cpu_mac = get_if_hwaddr(cpu_iface) # 检查端口的MAC地址是否一致
     if args.iface_mac != cpu_mac:
         print("[ERROR] CPU MAC address of interface " + args.iface + " is not " + args.iface_mac + ", but " + cpu_mac)
+        cpu_mac = args.iface_mac
     cpu_main = L7CPU(cpu_iface, cpu_mac)
     cpu_main.init_client()
     cpu_main.listen()
