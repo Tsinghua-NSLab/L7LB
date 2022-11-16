@@ -68,31 +68,28 @@ def get_tcp_options_wo_ts(pkt):
 class L7CPU:
     # 记录VIP到DIP的映射(在实际场景中, 我们并不是通过这种简单的查表完成的映射, 而要基于payload完成查表)
     #    实际使用中要把get_DIP_Port函数替换成真正的查表函数
-    VIP2DIP = [
-        ["10.0.1.10:1122", "10.0.1.2:22"],
-        ["10.0.1.10:1122", "10.0.1.3:22"]
-    ]
+    VIP2DIP = {"10.0.1.10:1122":{"test1.com":"10.0.1.2:22", "test2.com":"10.0.1.3:22"}}
     session_in_tbl = 'SwitchIngress.session_in'
     session_out_tbl = 'SwitchIngress.session_out'
 
     def get_DIP_Port(self, cip, vip ,vport, payload=""):
         # 把payload作为参数传输, 根据payload查找到真正的dip和dport
         vip_val = vip + ":" + str(vport)
-        dip_val = []
-        for vip_items in self.VIP2DIP:
-            if vip_val == vip_items[0]:
-                # 我们找到了vip的结果
-                dip_val.append(vip_items[1])
-        dip, dport = dip_val[(int(cip.split(".")[3]) + hash(payload)) % len(dip_val)].split(":")
-        return dip, int(dport)
+        dip_val = ""
+        if vip_val in self.VIP2DIP:
+            if payload in self.VIP2DIP[vip_val]:
+                dip_val = self.VIP2DIP[vip_val][payload]
+                dip, dport = dip_val.split(":")
+                return dip, int(dport)
 
     def get_VIP_Port(self, dip, dport):
         dip_val = dip + ":" + str(dport)
-        for dip_items in self.VIP2DIP:
-            if dip_val == dip_items[1]:
+        for vip_items in self.VIP2DIP:
+            for dip_items in self.VIP2DIP[vip_items]:
                 # 我们找到了vip的结果
-                vip, vport = dip_items[0].split(":")
-                return vip, int(vport)
+                if self.VIP2DIP[vip_items][dip_items] == dip_val:
+                    vip, vport = vip_items.split(":")
+                    return vip, int(vport)
 
     # 用于debug调试, 记录所有的发送网包等
     output_pkts = []
@@ -253,7 +250,8 @@ class L7CPU:
                     # 更新报文MAC
                     new_pkt[Ether].src, new_pkt[Ether].dst = self.cpu_mac, new_pkt[Ether].src # 交换MAC地址
                     # 更新目的IP和目的端口, 并记录下来
-                    dip, dport = self.get_DIP_Port(new_pkt[IP].src, new_pkt[IP].dst, new_pkt[TCP].dport) # 找到DIP和DPORT
+                    payload = self.analyze_payload(pkt)
+                    dip, dport = self.get_DIP_Port(new_pkt[IP].src, new_pkt[IP].dst, new_pkt[TCP].dport, payload) # 找到DIP和DPORT
                     new_pkt[IP].dst, new_pkt[TCP].dport = dip, dport
                     self.session_dip_port[flow] = (dip, dport) # 记录原来的流映射后的DIP和DPORT的信息
                     cli_dip_flow = new_pkt[IP].src + ":" + str(new_pkt[TCP].sport) + " -> " + new_pkt[IP].dst + ":" + str(new_pkt[TCP].dport)
@@ -390,6 +388,16 @@ class L7CPU:
         sniff(iface = self.cpu_iface, 
             lfilter=lambda pkt: (pkt[Ether].src != self.cpu_mac), 
             prn = lambda pkt: self.proxy_back(pkt)) # 源mac地址是CPU的mac地址, 说明是从CPU发出的报文, 我们不在乎这些报文    
+
+    def analyze_payload(self, pkt):
+        payload = pkt[TCP].payload
+        payload = bytes(payload).decode()
+        index_start = payload.find('Host: ')
+        index_start += 6
+        index_end = payload.find('\r', index_start)
+        payload = payload[index_start:index_end]
+        return payload
+            
 
 def main(args):
     cpu_iface = get_if(args.iface) # 检查端口是否存在
